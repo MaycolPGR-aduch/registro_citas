@@ -1,36 +1,124 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gestion de Citas Medicas (Next.js + Supabase)
 
-## Getting Started
+Aplicacion web funcional para gestion integral de citas medicas con:
 
-First, run the development server:
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS
+- Supabase
+
+## Base SQL de referencia
+
+El esquema base se mantiene en:
+
+- `docs/Estructura_base_de_datos.sql`
+
+No se modifica ese archivo. El ajuste funcional se aplica con migracion incremental.
+
+## Migracion adicional obligatoria
+
+Para permitir re-reserva despues de cancelar una cita, ejecuta:
+
+- `docs/migrations/001_allow_rebooking_after_cancel.sql`
+
+Motivo tecnico:
+
+- En el esquema base, `appointments.schedule_id` es `UNIQUE` global.
+- Eso bloquea volver a reservar un horario aunque la cita este `cancelled`.
+- La migracion reemplaza ese comportamiento por un indice unico parcial para citas activas.
+
+## Variables de entorno
+
+Crea `.env.local` (puedes copiar `.env.example`) con:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+Reglas:
+
+- `SUPABASE_SERVICE_ROLE_KEY` se usa solo en backend.
+- Nunca exponer `SUPABASE_SERVICE_ROLE_KEY` en `NEXT_PUBLIC_*`.
+
+## Ejecutar localmente
+
+1. Instalar dependencias:
+
+```bash
+npm install
+```
+
+2. Ejecutar en Supabase SQL Editor:
+- `docs/Estructura_base_de_datos.sql`
+- `docs/migrations/001_allow_rebooking_after_cancel.sql`
+
+3. Iniciar desarrollo:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+4. Abrir [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Validaciones
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+```
 
-## Learn More
+## Modulos UI
 
-To learn more about Next.js, take a look at the following resources:
+- `/` Dashboard
+- `/especialidades` CRUD de especialidades
+- `/medicos` CRUD de medicos
+- `/horarios` CRUD de horarios
+- `/pacientes` CRUD de pacientes
+- `/citas/nueva` Crear cita
+- `/citas` Gestion de citas (editar estado, motivo, notas, eliminar)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## API
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Especialidades
+- `GET /api/specialties`
+- `POST /api/specialties`
+- `PATCH /api/specialties/:id`
+- `DELETE /api/specialties/:id`
 
-## Deploy on Vercel
+### Medicos
+- `GET /api/doctors`
+- `POST /api/doctors`
+- `PATCH /api/doctors/:id`
+- `DELETE /api/doctors/:id`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Pacientes
+- `GET /api/patients?query=...`
+- `POST /api/patients`
+- `PATCH /api/patients/:id`
+- `DELETE /api/patients/:id`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Horarios
+- `GET /api/schedules?doctorId=...&date=YYYY-MM-DD`
+- `POST /api/schedules`
+- `PATCH /api/schedules/:id`
+- `DELETE /api/schedules/:id`
+- `GET /api/schedules/available?doctorId=...&date=YYYY-MM-DD`
+
+### Citas
+- `GET /api/appointments?status=...`
+- `POST /api/appointments`
+- `PATCH /api/appointments/:id`
+- `PATCH /api/appointments/:id/cancel`
+- `DELETE /api/appointments/:id`
+
+## Deploy en Vercel
+
+1. Subir repositorio a GitHub.
+2. Importar el proyecto en Vercel.
+3. Configurar variables:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+4. Redeploy.
