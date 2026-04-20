@@ -1,5 +1,5 @@
+import { requireAuth } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ScheduleSummary } from "@/lib/types";
 import { isValidIsoDate, parsePositiveInt } from "@/lib/validation";
 
@@ -67,6 +67,11 @@ function mapSchedule(raw: RawSchedule): ScheduleSummary {
 }
 
 export async function GET(request: Request) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { searchParams } = new URL(request.url);
   const doctorIdParam = searchParams.get("doctorId");
   const dateParam = searchParams.get("date");
@@ -80,12 +85,7 @@ export async function GET(request: Request) {
     return errorResponse(400, "date debe tener formato YYYY-MM-DD.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  let query = admin.client
+  let query = authResult.context.supabase
     .from("doctor_schedules")
     .select(
       "id, doctor_id, schedule_date, start_time, end_time, is_available, doctors!inner(full_name, active, specialties(name)), appointments(id, status)",

@@ -6,8 +6,8 @@ import {
   mapAppointment,
   releaseScheduleIfNoActiveAppointments,
 } from "@/lib/appointments";
+import { isStaffRole, requireAuth, requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isAppointmentStatus, normalizeOptionalText, parsePositiveInt } from "@/lib/validation";
 
 type RouteContext = {
@@ -23,6 +23,11 @@ type AppointmentPatchBody = {
 };
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const appointmentId = parsePositiveInt(idParam);
   if (!appointmentId) {
@@ -36,14 +41,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "El cuerpo de la solicitud debe ser JSON valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
+  const isStaff = isStaffRole(authResult.context.profile.role);
+  if (!isStaff && (Object.prototype.hasOwnProperty.call(body, "doctor_id") || Object.prototype.hasOwnProperty.call(body, "schedule_id"))) {
+    return errorResponse(403, "Los pacientes no pueden cambiar medico ni horario.");
   }
 
-  const { data: current, error: currentError } = await admin.client
+  const { data: current, error: currentError } = await authResult.context.supabase
     .from("appointments")
-    .select("id, status, doctor_id, schedule_id")
+    .select("id, status, doctor_id, schedule_id, patient_id")
     .eq("id", appointmentId)
     .maybeSingle();
 
@@ -54,14 +59,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(404, "No existe la cita solicitada.");
   }
 
+  if (!isStaff) {
+    if (!authResult.context.patientId || current.patient_id !== authResult.context.patientId) {
+      return errorResponse(403, "Solo puedes editar tus propias citas.");
+    }
+  }
+
   const nextStatus = body.status === undefined ? current.status : body.status;
   if (!isAppointmentStatus(nextStatus)) {
     return errorResponse(400, "status no es valido.");
   }
+  if (!isStaff && body.status !== undefined && nextStatus !== "scheduled" && nextStatus !== "cancelled") {
+    return errorResponse(403, "Como paciente solo puedes usar estados scheduled o cancelled.");
+  }
 
   const nextDoctorId = body.doctor_id === undefined ? current.doctor_id : parsePositiveInt(body.doctor_id);
   const nextScheduleId = body.schedule_id === undefined ? current.schedule_id : parsePositiveInt(body.schedule_id);
-
   if (!nextDoctorId || !nextScheduleId) {
     return errorResponse(400, "doctor_id y schedule_id deben ser enteros positivos.");
   }
@@ -86,11 +99,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (body.status !== undefined) {
     updates.status = nextStatus;
   }
-
   if (Object.prototype.hasOwnProperty.call(body, "reason")) {
     updates.reason = normalizeOptionalText(body.reason, 500);
   }
-
   if (Object.prototype.hasOwnProperty.call(body, "notes")) {
     updates.notes = normalizeOptionalText(body.notes, 1000);
   }
@@ -98,7 +109,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   let lockedScheduleId: number | null = null;
 
   if (nextStatus !== "cancelled") {
-    const { data: doctor, error: doctorError } = await admin.client
+    const { data: doctor, error: doctorError } = await authResult.context.supabase
       .from("doctors")
       .select("id, active")
       .eq("id", nextDoctorId)
@@ -114,7 +125,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       return errorResponse(409, "El medico no esta activo.");
     }
 
-    const { data: targetSchedule, error: targetScheduleError } = await admin.client
+    const { data: targetSchedule, error: targetScheduleError } = await authResult.context.supabase
       .from("doctor_schedules")
       .select("id, doctor_id, schedule_date, start_time, is_available")
       .eq("id", nextScheduleId)
@@ -130,7 +141,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       return errorResponse(400, "El horario no pertenece al medico indicado.");
     }
 
-    const activeCheck = await hasActiveAppointmentInSchedule(admin.client, nextScheduleId, appointmentId);
+    const activeCheck = await hasActiveAppointmentInSchedule(authResult.context.supabase, nextScheduleId, appointmentId);
     if (!activeCheck.ok) {
       return errorResponse(500, "No se pudo validar disponibilidad del horario.", activeCheck.error);
     }
@@ -140,13 +151,12 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const scheduleChanged = nextScheduleId !== current.schedule_id;
     const wasCancelled = current.status === "cancelled";
-
     if (scheduleChanged || wasCancelled) {
       if (!targetSchedule.is_available) {
         return errorResponse(409, "El horario no esta disponible.");
       }
 
-      const lockResult = await lockSchedule(admin.client, nextScheduleId);
+      const lockResult = await lockSchedule(authResult.context.supabase, nextScheduleId);
       if (!lockResult.ok) {
         return errorResponse(409, lockResult.error);
       }
@@ -167,7 +177,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "No se enviaron campos validos para actualizar.");
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("appointments")
     .update(updates)
     .eq("id", appointmentId)
@@ -176,7 +186,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (error) {
     if (lockedScheduleId) {
-      await admin.client.from("doctor_schedules").update({ is_available: true }).eq("id", lockedScheduleId);
+      await authResult.context.supabase.from("doctor_schedules").update({ is_available: true }).eq("id", lockedScheduleId);
     }
     if (error.code === "23505") {
       return errorResponse(409, "El horario seleccionado ya tiene una cita activa.");
@@ -186,16 +196,10 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const finalStatus = (updates.status ?? current.status) as "scheduled" | "completed" | "cancelled" | "no_show";
   const finalScheduleId = updates.schedule_id ?? current.schedule_id;
-
-  if (finalStatus === "cancelled") {
-    const releaseResult = await releaseScheduleIfNoActiveAppointments(admin.client, current.schedule_id);
+  if (finalStatus === "cancelled" || finalScheduleId !== current.schedule_id) {
+    const releaseResult = await releaseScheduleIfNoActiveAppointments(authResult.context.supabase, current.schedule_id);
     if (!releaseResult.ok) {
       return errorResponse(500, "La cita se actualizo, pero no se pudo liberar el horario.", releaseResult.error);
-    }
-  } else if (finalScheduleId !== current.schedule_id) {
-    const releaseResult = await releaseScheduleIfNoActiveAppointments(admin.client, current.schedule_id);
-    if (!releaseResult.ok) {
-      return errorResponse(500, "La cita se actualizo, pero no se pudo liberar el horario anterior.", releaseResult.error);
     }
   }
 
@@ -203,18 +207,18 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const appointmentId = parsePositiveInt(idParam);
   if (!appointmentId) {
     return errorResponse(400, "El id de cita no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: current, error: currentError } = await admin.client
+  const { data: current, error: currentError } = await authResult.context.supabase
     .from("appointments")
     .select("id, schedule_id")
     .eq("id", appointmentId)
@@ -227,13 +231,12 @@ export async function DELETE(_: Request, context: RouteContext) {
     return errorResponse(404, "No existe la cita solicitada.");
   }
 
-  const { error } = await admin.client.from("appointments").delete().eq("id", appointmentId);
-
+  const { error } = await authResult.context.supabase.from("appointments").delete().eq("id", appointmentId);
   if (error) {
     return errorResponse(500, "No se pudo eliminar la cita.", error.message);
   }
 
-  const releaseResult = await releaseScheduleIfNoActiveAppointments(admin.client, current.schedule_id);
+  const releaseResult = await releaseScheduleIfNoActiveAppointments(authResult.context.supabase, current.schedule_id);
   if (!releaseResult.ok) {
     return errorResponse(500, "La cita se elimino, pero no se pudo liberar el horario.", releaseResult.error);
   }

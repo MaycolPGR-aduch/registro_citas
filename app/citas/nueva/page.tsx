@@ -8,13 +8,19 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { SuccessMessage } from "@/components/ui/success-message";
 import { fetchJson } from "@/lib/fetcher";
-import { ApiPayload, DoctorSummary, PatientSummary, ScheduleSummary } from "@/lib/types";
+import { ApiPayload, DoctorSummary, PatientSummary, ScheduleSummary, UserRole } from "@/lib/types";
 
 type AppointmentForm = {
   patient_id: string;
   doctor_id: string;
   schedule_id: string;
   reason: string;
+};
+
+type AuthMePayload = {
+  user_id: string;
+  role: UserRole;
+  patient_id: number | null;
 };
 
 const INITIAL_FORM: AppointmentForm = {
@@ -25,6 +31,7 @@ const INITIAL_FORM: AppointmentForm = {
 };
 
 export default function NuevaCitaPage() {
+  const [currentUser, setCurrentUser] = useState<AuthMePayload | null>(null);
   const [patients, setPatients] = useState<PatientSummary[]>([]);
   const [doctors, setDoctors] = useState<DoctorSummary[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
@@ -36,6 +43,7 @@ export default function NuevaCitaPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const isPatient = currentUser?.role === "patient";
   const canLoadSchedules = useMemo(() => Boolean(form.doctor_id), [form.doctor_id]);
 
   const loadBaseData = useCallback(async () => {
@@ -43,13 +51,19 @@ export default function NuevaCitaPage() {
       setLoadingBase(true);
       setError(null);
 
-      const [patientsResponse, doctorsResponse] = await Promise.all([
-        fetchJson<ApiPayload<PatientSummary[]>>("/api/patients"),
-        fetchJson<ApiPayload<DoctorSummary[]>>("/api/doctors"),
-      ]);
+      const meResponse = await fetchJson<ApiPayload<AuthMePayload>>("/api/auth/me");
+      const me = meResponse.data;
+      setCurrentUser(me);
 
-      setPatients(patientsResponse.data);
+      const doctorsResponse = await fetchJson<ApiPayload<DoctorSummary[]>>("/api/doctors");
       setDoctors(doctorsResponse.data.filter((doctor) => doctor.active));
+
+      if (me.role !== "patient") {
+        const patientsResponse = await fetchJson<ApiPayload<PatientSummary[]>>("/api/patients");
+        setPatients(patientsResponse.data);
+      } else {
+        setPatients([]);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo cargar informacion base.");
     } finally {
@@ -107,8 +121,15 @@ export default function NuevaCitaPage() {
     event.preventDefault();
     setSuccess(null);
 
-    if (!form.patient_id || !form.doctor_id || !form.schedule_id) {
+    const patientIdToSend = isPatient ? currentUser?.patient_id : Number(form.patient_id);
+
+    if ((!isPatient && !form.patient_id) || !form.doctor_id || !form.schedule_id) {
       setError("Debes seleccionar paciente, medico y horario.");
+      return;
+    }
+
+    if (isPatient && !patientIdToSend) {
+      setError("Tu cuenta no tiene un perfil de paciente asociado.");
       return;
     }
 
@@ -122,7 +143,7 @@ export default function NuevaCitaPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          patient_id: Number(form.patient_id),
+          patient_id: patientIdToSend,
           doctor_id: Number(form.doctor_id),
           schedule_id: Number(form.schedule_id),
           reason: form.reason,
@@ -159,22 +180,24 @@ export default function NuevaCitaPage() {
       {!loadingBase && (
         <SectionCard>
           <form className="grid gap-3 md:grid-cols-2" onSubmit={handleSubmit}>
-            <div>
-              <label htmlFor="patient_id">Paciente *</label>
-              <select
-                id="patient_id"
-                value={form.patient_id}
-                onChange={(event) => setForm((prev) => ({ ...prev, patient_id: event.target.value }))}
-                required
-              >
-                <option value="">Seleccionar paciente</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patient.full_name} {patient.dni ? `- ${patient.dni}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {!isPatient && (
+              <div>
+                <label htmlFor="patient_id">Paciente *</label>
+                <select
+                  id="patient_id"
+                  value={form.patient_id}
+                  onChange={(event) => setForm((prev) => ({ ...prev, patient_id: event.target.value }))}
+                  required
+                >
+                  <option value="">Seleccionar paciente</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patient.full_name} {patient.dni ? `- ${patient.dni}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label htmlFor="doctor_id">Medico *</label>

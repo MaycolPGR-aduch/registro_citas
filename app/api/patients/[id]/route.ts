@@ -1,5 +1,5 @@
+import { requireAuth, isStaffRole } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { PatientSummary } from "@/lib/types";
 import { isValidIsoDate, normalizeOptionalText, parsePositiveInt, validateEmail } from "@/lib/validation";
 
@@ -15,13 +15,23 @@ type PatientPatchBody = {
   email?: unknown;
 };
 
-const SELECT_PATIENT = "id, full_name, dni, birth_date, phone, email";
+const SELECT_PATIENT = "id, profile_id, full_name, dni, birth_date, phone, email";
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const patientId = parsePositiveInt(idParam);
   if (!patientId) {
     return errorResponse(400, "El id de paciente no es valido.");
+  }
+
+  const canManageAll = isStaffRole(authResult.context.profile.role);
+  if (!canManageAll && authResult.context.patientId !== patientId) {
+    return errorResponse(403, "Solo puedes editar tu propio perfil de paciente.");
   }
 
   let body: PatientPatchBody;
@@ -81,12 +91,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "No se enviaron campos validos para actualizar.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("patients")
     .update(updates)
     .eq("id", patientId)
@@ -104,22 +109,35 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(404, "No existe el paciente solicitado.");
   }
 
-  return successResponse(data as PatientSummary);
+  const patient = data as PatientSummary & { profile_id?: string | null };
+
+  return successResponse({
+    id: patient.id,
+    full_name: patient.full_name,
+    dni: patient.dni,
+    birth_date: patient.birth_date,
+    phone: patient.phone,
+    email: patient.email,
+  });
 }
 
 export async function DELETE(_: Request, context: RouteContext) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
+  if (!isStaffRole(authResult.context.profile.role)) {
+    return errorResponse(403, "Solo el personal autorizado puede eliminar pacientes.");
+  }
+
   const { id: idParam } = await context.params;
   const patientId = parsePositiveInt(idParam);
   if (!patientId) {
     return errorResponse(400, "El id de paciente no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { error } = await admin.client.from("patients").delete().eq("id", patientId);
+  const { error } = await authResult.context.supabase.from("patients").delete().eq("id", patientId);
 
   if (error) {
     if (error.code === "23503") {

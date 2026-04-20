@@ -1,5 +1,5 @@
+import { requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { SpecialtySummary } from "@/lib/types";
 import { normalizeOptionalText, parsePositiveInt } from "@/lib/validation";
 
@@ -13,6 +13,11 @@ type SpecialtyPatchBody = {
 };
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const specialtyId = parsePositiveInt(idParam);
   if (!specialtyId) {
@@ -44,12 +49,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "No se enviaron campos validos para actualizar.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("specialties")
     .update(updates)
     .eq("id", specialtyId)
@@ -71,18 +71,18 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const specialtyId = parsePositiveInt(idParam);
   if (!specialtyId) {
     return errorResponse(400, "El id de especialidad no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { error } = await admin.client.from("specialties").delete().eq("id", specialtyId);
+  const { error } = await authResult.context.supabase.from("specialties").delete().eq("id", specialtyId);
 
   if (error) {
     if (error.code === "23503") {

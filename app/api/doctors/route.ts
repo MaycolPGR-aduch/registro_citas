@@ -1,5 +1,5 @@
+import { requireAuth, requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { DoctorSummary } from "@/lib/types";
 import { normalizeOptionalText, parsePositiveInt, validateEmail } from "@/lib/validation";
 
@@ -49,12 +49,15 @@ function mapDoctor(raw: RawDoctor): DoctorSummary {
 }
 
 export async function GET() {
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
   }
 
-  const { data, error } = await admin.client.from("doctors").select(SELECT_DOCTOR).order("full_name", { ascending: true });
+  const { data, error } = await authResult.context.supabase
+    .from("doctors")
+    .select(SELECT_DOCTOR)
+    .order("full_name", { ascending: true });
 
   if (error) {
     return errorResponse(500, "No se pudieron listar medicos.", error.message);
@@ -64,6 +67,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   let body: DoctorBody;
   try {
     body = (await request.json()) as DoctorBody;
@@ -86,12 +94,7 @@ export async function POST(request: Request) {
     return errorResponse(400, "email no tiene un formato valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: specialty, error: specialtyError } = await admin.client
+  const { data: specialty, error: specialtyError } = await authResult.context.supabase
     .from("specialties")
     .select("id")
     .eq("id", specialtyId)
@@ -104,7 +107,7 @@ export async function POST(request: Request) {
     return errorResponse(404, "No existe la especialidad indicada.");
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("doctors")
     .insert({
       full_name: fullName,

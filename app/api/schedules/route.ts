@@ -1,5 +1,5 @@
+import { requireAuth, requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ScheduleSummary } from "@/lib/types";
 import { isValidIsoDate, isValidTime, parseBoolean, parsePositiveInt, timeToMinutes } from "@/lib/validation";
 
@@ -76,6 +76,11 @@ function mapSchedule(raw: RawSchedule): ScheduleSummary {
 }
 
 export async function GET(request: Request) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { searchParams } = new URL(request.url);
   const doctorIdParam = searchParams.get("doctorId");
   const dateParam = searchParams.get("date");
@@ -95,12 +100,7 @@ export async function GET(request: Request) {
     return errorResponse(400, "onlyAvailable debe ser true o false.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  let query = admin.client
+  let query = authResult.context.supabase
     .from("doctor_schedules")
     .select(SELECT_SCHEDULE)
     .order("schedule_date", { ascending: true })
@@ -130,6 +130,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   let body: ScheduleBody;
   try {
     body = (await request.json()) as ScheduleBody;
@@ -155,12 +160,7 @@ export async function POST(request: Request) {
     return errorResponse(400, "end_time debe ser mayor a start_time.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: doctor, error: doctorError } = await admin.client
+  const { data: doctor, error: doctorError } = await authResult.context.supabase
     .from("doctors")
     .select("id")
     .eq("id", doctorId)
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
     return errorResponse(404, "No existe el medico indicado.");
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("doctor_schedules")
     .insert({
       doctor_id: doctorId,

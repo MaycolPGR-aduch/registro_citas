@@ -1,4 +1,12 @@
 export type AppointmentStatus = "scheduled" | "completed" | "cancelled" | "no_show";
+export type UserRole = "admin" | "receptionist" | "patient";
+
+export type ProfileSummary = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  role: UserRole;
+};
 
 export type SpecialtySummary = {
   id: number;

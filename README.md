@@ -1,31 +1,31 @@
 # Gestion de Citas Medicas (Next.js + Supabase)
 
-Aplicacion web funcional para gestion integral de citas medicas con:
+Aplicacion web academica para gestionar citas medicas con:
 
-- Next.js (App Router)
+- Next.js App Router
 - TypeScript
 - Tailwind CSS
-- Supabase
+- Supabase (Postgres + Auth)
 
-## Base SQL de referencia
+## SQL de referencia y migraciones
 
-El esquema base se mantiene en:
+El esquema base historico se mantiene en:
 
 - `docs/Estructura_base_de_datos.sql`
 
-No se modifica ese archivo. El ajuste funcional se aplica con migracion incremental.
+No se modifica ese archivo. Los ajustes se aplican como migraciones incrementales.
 
-## Migracion adicional obligatoria
+Ejecuta en este orden dentro de Supabase SQL Editor:
 
-Para permitir re-reserva despues de cancelar una cita, ejecuta:
+1. `docs/Estructura_base_de_datos.sql`
+2. `docs/migrations/001_allow_rebooking_after_cancel.sql`
+3. `docs/migrations/002_auth_rls.sql`
 
-- `docs/migrations/001_allow_rebooking_after_cancel.sql`
+### Justificacion tecnica de `001`
 
-Motivo tecnico:
-
-- En el esquema base, `appointments.schedule_id` es `UNIQUE` global.
-- Eso bloquea volver a reservar un horario aunque la cita este `cancelled`.
-- La migracion reemplaza ese comportamiento por un indice unico parcial para citas activas.
+En el SQL base, `appointments.schedule_id` tiene `UNIQUE` global.  
+Eso impide re-reservar un horario si existio una cita cancelada.  
+La migracion `001` elimina esa unicidad rigida y crea un indice unico parcial para citas activas.
 
 ## Variables de entorno
 
@@ -39,86 +39,92 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 Reglas:
 
-- `SUPABASE_SERVICE_ROLE_KEY` se usa solo en backend.
-- Nunca exponer `SUPABASE_SERVICE_ROLE_KEY` en `NEXT_PUBLIC_*`.
+- `NEXT_PUBLIC_*` solo para URL y anon key.
+- `SUPABASE_SERVICE_ROLE_KEY` nunca debe exponerse al frontend.
+- El flujo normal de usuario en esta fase usa sesion + RLS; no depende de `service_role` en runtime de APIs.
+
+## Configuracion de Supabase Auth
+
+1. En Supabase, habilita provider Email (password).
+2. Decide si activas o no confirmacion de email:
+   - si esta desactivada, el paciente entra inmediatamente tras registro;
+   - si esta activada, debe confirmar antes de iniciar sesion.
+3. Registro publico en la app: solo pacientes (`/registro`).
+4. `admin` y `receptionist`: crear manualmente usuario en Supabase Auth y luego actualizar rol en `public.profiles`.
+
+Ejemplo para asignar rol staff:
+
+```sql
+update public.profiles
+set role = 'receptionist'
+where email = 'recepcion@tu-dominio.com';
+```
 
 ## Ejecutar localmente
 
-1. Instalar dependencias:
-
 ```bash
 npm install
-```
-
-2. Ejecutar en Supabase SQL Editor:
-- `docs/Estructura_base_de_datos.sql`
-- `docs/migrations/001_allow_rebooking_after_cancel.sql`
-
-3. Iniciar desarrollo:
-
-```bash
 npm run dev
 ```
 
-4. Abrir [http://localhost:3000](http://localhost:3000).
+Abrir: [http://localhost:3000](http://localhost:3000)
 
-## Validaciones
+## Validaciones tecnicas
 
 ```bash
 npm run lint
 npm run build
 ```
 
-## Modulos UI
+## Modulos y rutas
 
-- `/` Dashboard
-- `/especialidades` CRUD de especialidades
-- `/medicos` CRUD de medicos
-- `/horarios` CRUD de horarios
-- `/pacientes` CRUD de pacientes
-- `/citas/nueva` Crear cita
-- `/citas` Gestion de citas (editar estado, motivo, notas, eliminar)
+Autenticacion:
 
-## API
+- `/login`
+- `/registro`
 
-### Especialidades
-- `GET /api/specialties`
-- `POST /api/specialties`
-- `PATCH /api/specialties/:id`
-- `DELETE /api/specialties/:id`
+Staff (`admin` / `receptionist`):
 
-### Medicos
+- `/` dashboard
+- `/especialidades`
+- `/medicos`
+- `/horarios`
+- `/pacientes`
+- `/citas/nueva`
+- `/citas`
+
+Paciente:
+
+- `/mi-citas`
+- `/citas/nueva`
+
+## Endpoints principales
+
 - `GET /api/doctors`
-- `POST /api/doctors`
-- `PATCH /api/doctors/:id`
-- `DELETE /api/doctors/:id`
-
-### Pacientes
+- `GET /api/schedules/available?date=YYYY-MM-DD&doctorId=...`
 - `GET /api/patients?query=...`
 - `POST /api/patients`
-- `PATCH /api/patients/:id`
-- `DELETE /api/patients/:id`
-
-### Horarios
-- `GET /api/schedules?doctorId=...&date=YYYY-MM-DD`
-- `POST /api/schedules`
-- `PATCH /api/schedules/:id`
-- `DELETE /api/schedules/:id`
-- `GET /api/schedules/available?doctorId=...&date=YYYY-MM-DD`
-
-### Citas
 - `GET /api/appointments?status=...`
 - `POST /api/appointments`
 - `PATCH /api/appointments/:id`
 - `PATCH /api/appointments/:id/cancel`
-- `DELETE /api/appointments/:id`
+
+## Seguridad aplicada
+
+- Middleware para proteger rutas privadas y redirigir a `/login`.
+- Verificacion de rol en route handlers (`requireAuth`, `requireStaff`, checks de ownership).
+- RLS habilitado en tablas operativas.
+- Restriccion por ambito:
+  - staff: gestion global.
+  - patient: solo sus propios datos/citas.
 
 ## Deploy en Vercel
 
-1. Subir repositorio a GitHub.
-2. Importar el proyecto en Vercel.
-3. Configurar variables:
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-4. Redeploy.
+1. Importa el repositorio en Vercel.
+2. Configura variables de entorno:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+3. Redeploy.
+
+Importante: asegúrate de haber ejecutado las tres consultas SQL en Supabase antes de probar en produccion.

@@ -1,6 +1,6 @@
+import { isStaffRole, requireAuth } from "@/lib/auth/session";
 import { APPOINTMENT_SELECT, RawAppointment, hasActiveAppointmentInSchedule, lockSchedule, mapAppointment } from "@/lib/appointments";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isAppointmentStatus, normalizeOptionalText, parsePositiveInt } from "@/lib/validation";
 
 type AppointmentBody = {
@@ -11,6 +11,11 @@ type AppointmentBody = {
 };
 
 export async function GET(request: Request) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { searchParams } = new URL(request.url);
   const statusParam = searchParams.get("status");
 
@@ -18,12 +23,12 @@ export async function GET(request: Request) {
     return errorResponse(400, "status no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
+  const isStaff = isStaffRole(authResult.context.profile.role);
+  if (!isStaff && !authResult.context.patientId) {
+    return errorResponse(403, "No existe perfil de paciente asociado.");
   }
 
-  let query = admin.client
+  let query = authResult.context.supabase
     .from("appointments")
     .select(APPOINTMENT_SELECT)
     .order("appointment_date", { ascending: false })
@@ -32,6 +37,10 @@ export async function GET(request: Request) {
 
   if (statusParam) {
     query = query.eq("status", statusParam);
+  }
+
+  if (!isStaff) {
+    query = query.eq("patient_id", authResult.context.patientId as number);
   }
 
   const { data, error } = await query;
@@ -43,6 +52,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   let body: AppointmentBody;
   try {
     body = (await request.json()) as AppointmentBody;
@@ -50,23 +64,36 @@ export async function POST(request: Request) {
     return errorResponse(400, "El cuerpo de la solicitud debe ser JSON valido.");
   }
 
-  const patientId = parsePositiveInt(body.patient_id);
   const doctorId = parsePositiveInt(body.doctor_id);
   const scheduleId = parsePositiveInt(body.schedule_id);
   const reason = normalizeOptionalText(body.reason, 500);
 
-  if (!patientId || !doctorId || !scheduleId) {
-    return errorResponse(400, "patient_id, doctor_id y schedule_id son obligatorios y deben ser enteros positivos.");
+  if (!doctorId || !scheduleId) {
+    return errorResponse(400, "doctor_id y schedule_id son obligatorios y deben ser enteros positivos.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
+  const isStaff = isStaffRole(authResult.context.profile.role);
+  const requestedPatientId = parsePositiveInt(body.patient_id);
+  let patientId: number;
+
+  if (isStaff) {
+    if (!requestedPatientId) {
+      return errorResponse(400, "patient_id es obligatorio para personal administrativo.");
+    }
+    patientId = requestedPatientId;
+  } else {
+    if (!authResult.context.patientId) {
+      return errorResponse(403, "No existe perfil de paciente asociado.");
+    }
+    if (requestedPatientId && requestedPatientId !== authResult.context.patientId) {
+      return errorResponse(403, "No puedes crear citas para otro paciente.");
+    }
+    patientId = authResult.context.patientId;
   }
 
-  const { data: patient, error: patientError } = await admin.client
+  const { data: patient, error: patientError } = await authResult.context.supabase
     .from("patients")
-    .select("id")
+    .select("id, profile_id")
     .eq("id", patientId)
     .maybeSingle();
 
@@ -74,10 +101,13 @@ export async function POST(request: Request) {
     return errorResponse(500, "No se pudo validar el paciente.", patientError.message);
   }
   if (!patient) {
-    return errorResponse(404, "No existe el paciente indicado.");
+    return errorResponse(isStaff ? 404 : 403, "No se puede usar el paciente indicado.");
+  }
+  if (!isStaff && patient.profile_id !== authResult.context.user.id) {
+    return errorResponse(403, "No puedes crear citas para otro paciente.");
   }
 
-  const { data: doctor, error: doctorError } = await admin.client
+  const { data: doctor, error: doctorError } = await authResult.context.supabase
     .from("doctors")
     .select("id, active")
     .eq("id", doctorId)
@@ -93,7 +123,7 @@ export async function POST(request: Request) {
     return errorResponse(409, "El medico no esta activo para recibir citas.");
   }
 
-  const { data: schedule, error: scheduleError } = await admin.client
+  const { data: schedule, error: scheduleError } = await authResult.context.supabase
     .from("doctor_schedules")
     .select("id, doctor_id, schedule_date, start_time, is_available")
     .eq("id", scheduleId)
@@ -108,8 +138,11 @@ export async function POST(request: Request) {
   if (schedule.doctor_id !== doctorId) {
     return errorResponse(400, "El horario no pertenece al medico indicado.");
   }
+  if (!schedule.is_available) {
+    return errorResponse(409, "El horario no esta disponible.");
+  }
 
-  const activeCheck = await hasActiveAppointmentInSchedule(admin.client, scheduleId);
+  const activeCheck = await hasActiveAppointmentInSchedule(authResult.context.supabase, scheduleId);
   if (!activeCheck.ok) {
     return errorResponse(500, "No se pudo validar disponibilidad del horario.", activeCheck.error);
   }
@@ -117,12 +150,12 @@ export async function POST(request: Request) {
     return errorResponse(409, "El horario ya tiene una cita activa.");
   }
 
-  const lockResult = await lockSchedule(admin.client, scheduleId);
+  const lockResult = await lockSchedule(authResult.context.supabase, scheduleId);
   if (!lockResult.ok) {
     return errorResponse(409, lockResult.error);
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("appointments")
     .insert({
       patient_id: patientId,
@@ -132,12 +165,13 @@ export async function POST(request: Request) {
       appointment_time: schedule.start_time,
       reason,
       status: "scheduled",
+      created_by: authResult.context.user.id,
     })
     .select(APPOINTMENT_SELECT)
     .single();
 
   if (error) {
-    await admin.client.from("doctor_schedules").update({ is_available: true }).eq("id", scheduleId);
+    await authResult.context.supabase.from("doctor_schedules").update({ is_available: true }).eq("id", scheduleId);
     if (error.code === "23505") {
       return errorResponse(409, "El horario seleccionado ya tiene una cita activa.");
     }

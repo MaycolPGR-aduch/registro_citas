@@ -1,6 +1,6 @@
 import { releaseScheduleIfNoActiveAppointments } from "@/lib/appointments";
+import { isStaffRole, requireAuth } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { normalizeOptionalText, parsePositiveInt } from "@/lib/validation";
 
 type CancelBody = {
@@ -12,6 +12,11 @@ type RouteContext = {
 };
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const appointmentId = parsePositiveInt(idParam);
   if (!appointmentId) {
@@ -26,15 +31,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const notes = normalizeOptionalText(body.notes, 1000);
-
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: appointment, error: appointmentError } = await admin.client
+  const { data: appointment, error: appointmentError } = await authResult.context.supabase
     .from("appointments")
-    .select("id, status, schedule_id")
+    .select("id, status, schedule_id, patient_id")
     .eq("id", appointmentId)
     .maybeSingle();
 
@@ -44,6 +43,13 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!appointment) {
     return errorResponse(404, "No existe la cita solicitada.");
   }
+
+  if (!isStaffRole(authResult.context.profile.role)) {
+    if (!authResult.context.patientId || appointment.patient_id !== authResult.context.patientId) {
+      return errorResponse(403, "Solo puedes cancelar tus propias citas.");
+    }
+  }
+
   if (appointment.status === "cancelled") {
     return errorResponse(409, "La cita ya esta cancelada.");
   }
@@ -55,7 +61,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     payload.notes = notes;
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("appointments")
     .update(payload)
     .eq("id", appointmentId)
@@ -66,7 +72,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(500, "No se pudo cancelar la cita.", error.message);
   }
 
-  const releaseResult = await releaseScheduleIfNoActiveAppointments(admin.client, appointment.schedule_id);
+  const releaseResult = await releaseScheduleIfNoActiveAppointments(authResult.context.supabase, appointment.schedule_id);
   if (!releaseResult.ok) {
     return errorResponse(500, "La cita se cancelo, pero no se pudo liberar el horario.", releaseResult.error);
   }

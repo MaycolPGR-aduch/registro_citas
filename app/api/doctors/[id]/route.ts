@@ -1,5 +1,5 @@
+import { requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { DoctorSummary } from "@/lib/types";
 import { normalizeOptionalText, parseBoolean, parsePositiveInt, validateEmail } from "@/lib/validation";
 
@@ -53,6 +53,11 @@ function mapDoctor(raw: RawDoctor): DoctorSummary {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const doctorId = parsePositiveInt(idParam);
   if (!doctorId) {
@@ -123,12 +128,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "No se enviaron campos validos para actualizar.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: existing, error: existingError } = await admin.client
+  const { data: existing, error: existingError } = await authResult.context.supabase
     .from("doctors")
     .select("id")
     .eq("id", doctorId)
@@ -142,7 +142,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (updates.specialty_id) {
-    const { data: specialty, error: specialtyError } = await admin.client
+    const { data: specialty, error: specialtyError } = await authResult.context.supabase
       .from("specialties")
       .select("id")
       .eq("id", updates.specialty_id)
@@ -156,7 +156,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("doctors")
     .update(updates)
     .eq("id", doctorId)
@@ -174,18 +174,18 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const doctorId = parsePositiveInt(idParam);
   if (!doctorId) {
     return errorResponse(400, "El id de medico no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: existing, error: existingError } = await admin.client
+  const { data: existing, error: existingError } = await authResult.context.supabase
     .from("doctors")
     .select("id")
     .eq("id", doctorId)
@@ -198,7 +198,7 @@ export async function DELETE(_: Request, context: RouteContext) {
     return errorResponse(404, "No existe el medico solicitado.");
   }
 
-  const { error } = await admin.client.from("doctors").delete().eq("id", doctorId);
+  const { error } = await authResult.context.supabase.from("doctors").delete().eq("id", doctorId);
 
   if (error) {
     if (error.code === "23503") {

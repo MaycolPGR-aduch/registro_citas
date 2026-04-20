@@ -1,5 +1,5 @@
+import { requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ScheduleSummary } from "@/lib/types";
 import { isValidIsoDate, isValidTime, parseBoolean, parsePositiveInt, timeToMinutes } from "@/lib/validation";
 
@@ -80,6 +80,11 @@ function mapSchedule(raw: RawSchedule): ScheduleSummary {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const scheduleId = parsePositiveInt(idParam);
   if (!scheduleId) {
@@ -142,12 +147,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(400, "No se enviaron campos validos para actualizar.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: current, error: currentError } = await admin.client
+  const { data: current, error: currentError } = await authResult.context.supabase
     .from("doctor_schedules")
     .select("id, start_time, end_time")
     .eq("id", scheduleId)
@@ -167,7 +167,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (updates.doctor_id) {
-    const { data: doctor, error: doctorError } = await admin.client
+    const { data: doctor, error: doctorError } = await authResult.context.supabase
       .from("doctors")
       .select("id")
       .eq("id", updates.doctor_id)
@@ -181,7 +181,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
-  const { data: activeAppointments, error: activeAppointmentsError } = await admin.client
+  const { data: activeAppointments, error: activeAppointmentsError } = await authResult.context.supabase
     .from("appointments")
     .select("id")
     .eq("schedule_id", scheduleId)
@@ -196,7 +196,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return errorResponse(409, "No se puede marcar disponible un horario con cita activa.");
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("doctor_schedules")
     .update(updates)
     .eq("id", scheduleId)
@@ -217,18 +217,18 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_: Request, context: RouteContext) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   const { id: idParam } = await context.params;
   const scheduleId = parsePositiveInt(idParam);
   if (!scheduleId) {
     return errorResponse(400, "El id de horario no es valido.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data: appointments, error: appointmentsError } = await admin.client
+  const { data: appointments, error: appointmentsError } = await authResult.context.supabase
     .from("appointments")
     .select("id")
     .eq("schedule_id", scheduleId)
@@ -242,7 +242,7 @@ export async function DELETE(_: Request, context: RouteContext) {
     return errorResponse(409, "No se puede eliminar un horario con citas asociadas.");
   }
 
-  const { error } = await admin.client.from("doctor_schedules").delete().eq("id", scheduleId);
+  const { error } = await authResult.context.supabase.from("doctor_schedules").delete().eq("id", scheduleId);
 
   if (error) {
     return errorResponse(500, "No se pudo eliminar el horario.", error.message);

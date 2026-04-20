@@ -1,5 +1,5 @@
+import { requireAuth, requireStaff } from "@/lib/auth/session";
 import { errorResponse, successResponse } from "@/lib/http";
-import { tryCreateSupabaseAdminClient } from "@/lib/supabase/admin";
 import { SpecialtySummary } from "@/lib/types";
 import { normalizeOptionalText } from "@/lib/validation";
 
@@ -9,12 +9,12 @@ type SpecialtyBody = {
 };
 
 export async function GET() {
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
+  const authResult = await requireAuth();
+  if (!authResult.ok) {
+    return authResult.response;
   }
 
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("specialties")
     .select("id, name, description")
     .order("name", { ascending: true });
@@ -27,6 +27,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authResult = await requireStaff();
+  if (!authResult.ok) {
+    return authResult.response;
+  }
+
   let body: SpecialtyBody;
   try {
     body = (await request.json()) as SpecialtyBody;
@@ -41,12 +46,7 @@ export async function POST(request: Request) {
     return errorResponse(400, "name es obligatorio.");
   }
 
-  const admin = tryCreateSupabaseAdminClient();
-  if (!admin.client) {
-    return errorResponse(500, "Configuracion de servidor incompleta.", admin.error);
-  }
-
-  const { data, error } = await admin.client
+  const { data, error } = await authResult.context.supabase
     .from("specialties")
     .insert({ name, description })
     .select("id, name, description")
