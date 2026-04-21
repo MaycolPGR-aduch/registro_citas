@@ -1,249 +1,198 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { FaUserPlus, FaSignInAlt, FaEye, FaEyeSlash, FaCheck, FaTimes, FaHospital, FaUserCheck } from "react-icons/fa";
+import { sileo } from "sileo";
 import { signUpPatientAction } from "@/app/auth/actions";
 import { INITIAL_AUTH_STATE } from "@/app/auth/form-state";
-import { ErrorMessage } from "@/components/ui/error-message";
-import { SectionCard } from "@/components/ui/section-card";
-import { SuccessMessage } from "@/components/ui/success-message";
-
-type PasswordRule = {
-  label: string;
-  valid: boolean;
-};
 
 export default function RegistroPage() {
-  const [state, formAction, pending] = useActionState(
-    signUpPatientAction,
-    INITIAL_AUTH_STATE,
-  );
-
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [state, formAction, pending] = useActionState(signUpPatientAction, INITIAL_AUTH_STATE);
+  
   const [showPassword, setShowPassword] = useState(false);
-  const [clientError, setClientError] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
 
-  const passwordRules = useMemo<PasswordRule[]>(
-    () => [
-      {
-        label: "Al menos 8 caracteres",
-        valid: password.length >= 8,
-      },
-      {
-        label: "Contiene una letra",
-        valid: /[A-Za-z]/.test(password),
-      },
-      {
-        label: "Contiene un número",
-        valid: /\d/.test(password),
-      },
-    ],
-    [password],
-  );
-
-  const passwordsMatch =
-    password.length > 0 &&
-    confirmPassword.length > 0 &&
-    password === confirmPassword;
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    setClientError(null);
-
-    if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
-      event.preventDefault();
-      setClientError("Completa todos los campos obligatorios.");
-      return;
+  useEffect(() => {
+    if (state.error) {
+      sileo.error({ title: "Error de Registro", description: state.error });
     }
-
-    if (password.length < 8) {
-      event.preventDefault();
-      setClientError("La contraseña debe tener al menos 8 caracteres.");
-      return;
+    if (state.message) {
+      sileo.success({ title: "Cuenta Creada", description: state.message });
     }
+  }, [state]);
 
-    if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-      event.preventDefault();
-      setClientError("La contraseña debe incluir al menos una letra y un número.");
-      return;
-    }
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
 
-    if (password !== confirmPassword) {
-      event.preventDefault();
-      setClientError("Las contraseñas no coinciden.");
-    }
-  }
+  const requirements = [
+    { label: "Mínimo 8 caracteres", met: password.length >= 8 },
+    { label: "Al menos una mayúscula", met: /[A-Z]/.test(password) },
+    { label: "Al menos un número", met: /[0-9]/.test(password) },
+    { label: "Un carácter especial", met: /[^A-Za-z0-9]/.test(password) },
+  ];
+
+  const allRequirementsMet = requirements.every(req => req.met);
 
   return (
-    <section className="mx-auto flex min-h-[78vh] w-full max-w-6xl items-center justify-center px-4 py-8">
-      <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl lg:grid-cols-2">
-        <div className="hidden lg:flex flex-col justify-between bg-gradient-to-br from-cyan-600 via-sky-600 to-blue-700 p-10 text-white">
-          <div>
-            <p className="mb-3 inline-flex rounded-full border border-white/30 bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide uppercase">
-              Registro de paciente
-            </p>
-            <h1 className="text-4xl font-bold leading-tight">
-              Crea tu cuenta y agenda tus citas
-            </h1>
-            <p className="mt-4 max-w-md text-sm text-white/90">
-              Regístrate para reservar, revisar y cancelar tus propias citas médicas
-              desde una sola plataforma.
-            </p>
-          </div>
+    <main className="min-h-screen w-full flex items-center justify-center p-4 md:p-8 bg-[radial-gradient(circle_at_bottom_left,_#f8fafc,_#e2e8f0)] relative overflow-hidden">
+      {/* Elementos decorativos de fondo */}
+      <div className="absolute top-[-5%] right-[-5%] w-1/2 h-1/2 bg-sky-100/50 rounded-full blur-[120px] -z-10" />
+      <div className="absolute bottom-[-5%] left-[-5%] w-1/2 h-1/2 bg-indigo-100/50 rounded-full blur-[120px] -z-10" />
 
-          <div className="grid gap-3">
-            <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-              <p className="text-sm font-semibold">Acceso personal</p>
-              <p className="mt-1 text-sm text-white/85">
-                Cada paciente gestiona únicamente sus propias citas.
-              </p>
+      {/* CARD FLOTANTE PRINCIPAL (Invertida) */}
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-5xl bg-white rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.14)] overflow-hidden flex flex-col md:flex-row-reverse min-h-[600px] border border-white"
+      >
+        
+        {/* LADO DERECHO: PANEL VISUAL (Dentro de la Card) */}
+        <section className="relative hidden md:flex md:w-1/2 bg-slate-900 overflow-hidden">
+          <div 
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-[20s] hover:scale-110"
+            style={{ backgroundImage: "url('/banner_hospital.jpg')" }}
+          />
+          <div className="absolute inset-0 bg-gradient-to-tl from-sky-900/90 via-sky-900/40 to-transparent" />
+          
+          <div className="relative z-10 flex flex-col justify-between h-full p-10 lg:p-14 text-white text-right items-end w-full">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-black tracking-widest uppercase italic opacity-80">Sitema Médico</span>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 backdrop-blur-xl border border-white/20">
+                <FaHospital className="text-xl text-sky-400" />
+              </div>
             </div>
 
-            <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-              <p className="text-sm font-semibold">Proceso simple</p>
-              <p className="mt-1 text-sm text-white/85">
-                Regístrate, inicia sesión y reserva un horario disponible.
+            <div className="space-y-6 max-w-sm">
+              <h1 className="text-4xl lg:text-5xl font-black leading-tight tracking-tight">
+                Portal del <br /><span className="text-sky-400">Paciente</span>
+              </h1>
+              <p className="text-lg text-slate-200 font-medium leading-relaxed">
+                Tu salud a un clic de distancia.
               </p>
+              <div className="flex items-start gap-4 p-4 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 text-left">
+                <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-sky-500/20 text-sky-400 shrink-0">
+                  <FaUserCheck className="text-sm" />
+                </div>
+                <p className="text-xs lg:text-sm text-slate-300 leading-snug">
+                  Cada paciente gestiona sus propias citas de forma autónoma y rápida.
+                </p>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+              © 2026 Sistema Hospitalario
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="flex items-center justify-center bg-slate-50 p-5 sm:p-8">
-          <div className="w-full max-w-md space-y-5">
+        {/* LADO IZQUIERDO: FORMULARIO (Dentro de la Card) */}
+        <section className="flex-1 flex flex-col justify-center p-8 lg:p-14 bg-white overflow-y-auto custom-scrollbar">
+          <div className="w-full max-w-sm mx-auto space-y-6 my-auto">
             <div className="space-y-2">
-              <p className="text-sm font-medium text-sky-700">Nuevo paciente</p>
-              <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
-                Registro de cuenta
-              </h2>
-              <p className="text-sm text-slate-600">
-                Crea tu cuenta para reservar y gestionar tus propias citas médicas.
-              </p>
+              <div className="md:hidden flex h-12 w-12 items-center justify-center rounded-xl bg-sky-100 text-sky-600 mb-4">
+                <FaHospital className="text-xl" />
+              </div>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tight">Registro</h2>
+              <p className="text-slate-500 font-medium">Únete y gestiona tu salud hoy.</p>
             </div>
 
-            {clientError && <ErrorMessage message={clientError} />}
-            {state.error && <ErrorMessage message={state.error} />}
-            {state.message && <SuccessMessage message={state.message} />}
+            <form action={formAction} className="space-y-4">
+              <div className="space-y-1">
+                <label htmlFor="full_name" className="text-sm font-bold text-slate-700 ml-1">Nombre Completo</label>
+                <input 
+                  id="full_name" 
+                  name="full_name" 
+                  required 
+                  className="w-full rounded-2xl border-slate-200 bg-slate-50/50 py-3 px-4 focus:border-sky-500 focus:ring-sky-500 transition-all shadow-sm"
+                  placeholder="Ej. Juan Pérez"
+                />
+              </div>
 
-            <SectionCard className="border border-slate-200 bg-white shadow-sm">
-              <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="full_name">Nombre completo</label>
-                  <input
-                    id="full_name"
-                    name="full_name"
-                    value={fullName}
-                    onChange={(event) => setFullName(event.target.value)}
-                    placeholder="Ingresa tu nombre completo"
-                    autoComplete="name"
-                    required
-                  />
-                </div>
+              <div className="space-y-1">
+                <label htmlFor="email" className="text-sm font-bold text-slate-700 ml-1">Email</label>
+                <input 
+                  id="email" 
+                  name="email" 
+                  type="email" 
+                  autoComplete="email" 
+                  required 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-2xl border-slate-200 bg-slate-50/50 py-3 px-4 focus:border-sky-500 focus:ring-sky-500 transition-all shadow-sm"
+                  placeholder="nombre@ejemplo.com"
+                />
+              </div>
 
-                <div>
-                  <label htmlFor="email">Correo electrónico</label>
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="correo@ejemplo.com"
-                    autoComplete="email"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-1 flex items-center justify-between">
-                    <label htmlFor="password" className="mb-0">
-                      Contraseña
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="text-xs font-semibold text-sky-700 hover:text-sky-600"
-                    >
-                      {showPassword ? "Ocultar" : "Mostrar"}
-                    </button>
-                  </div>
-
-                  <input
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
+              <div className="space-y-1">
+                <label htmlFor="password" className="text-sm font-bold text-slate-700 ml-1">Contraseña</label>
+                <div className="relative group">
+                  <input 
+                    id="password" 
+                    name="password" 
+                    type={showPassword ? "text" : "password"} 
+                    autoComplete="new-password" 
+                    required 
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Crea una contraseña segura"
-                    autoComplete="new-password"
-                    required
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-2xl border-slate-200 bg-slate-50/50 py-3 px-4 focus:border-sky-500 focus:ring-sky-500 transition-all pr-12 shadow-sm"
+                    placeholder="Contraseña segura"
                   />
-
-                  <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-semibold text-slate-700">
-                      Requisitos de contraseña
-                    </p>
-
-                    <ul className="space-y-1 text-xs">
-                      {passwordRules.map((rule) => (
-                        <li
-                          key={rule.label}
-                          className={rule.valid ? "text-emerald-700" : "text-slate-500"}
-                        >
-                          {rule.valid ? "✓" : "•"} {rule.label}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={togglePasswordVisibility}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-sky-600 transition-colors"
+                  >
+                    {showPassword ? <FaEyeSlash className="text-xl" /> : <FaEye className="text-xl" />}
+                  </button>
                 </div>
-
-                <div>
-                  <label htmlFor="confirm_password">Confirmar contraseña</label>
-                  <input
-                    id="confirm_password"
-                    type={showPassword ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="Repite tu contraseña"
-                    autoComplete="new-password"
-                    required
-                  />
-
-                  {confirmPassword.length > 0 && (
-                    <p
-                      className={`mt-2 text-xs ${
-                        passwordsMatch ? "text-emerald-700" : "text-rose-700"
-                      }`}
-                    >
-                      {passwordsMatch
-                        ? "Las contraseñas coinciden."
-                        : "Las contraseñas no coinciden."}
-                    </p>
-                  )}
+                
+                {/* Seguridad de clave simplificada para la Card */}
+                <div className="mt-3 grid grid-cols-2 gap-2 p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                  {requirements.map((req, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <div className={`flex h-3.5 w-3.5 items-center justify-center rounded-full ${req.met ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-400'}`}>
+                        {req.met ? <FaCheck className="text-[6px]" /> : <FaTimes className="text-[6px]" />}
+                      </div>
+                      <span className={`text-[10px] font-bold ${req.met ? 'text-emerald-700' : 'text-slate-400'}`}>
+                        {req.label}
+                      </span>
+                    </div>
+                  ))}
                 </div>
+              </div>
 
-                <button type="submit" className="btn-primary w-full" disabled={pending}>
-                  {pending ? "Creando cuenta..." : "Crear cuenta"}
-                </button>
-              </form>
-            </SectionCard>
+              <motion.button 
+                whileHover={{ scale: 1.01, y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                type="submit" 
+                className="btn-primary w-full py-4 text-base font-bold shadow-xl shadow-sky-100 mt-2 rounded-2xl flex items-center justify-center gap-3 transition-all" 
+                disabled={pending || (!allRequirementsMet && password.length > 0)}
+              >
+                {pending ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                ) : (
+                  <>
+                    <FaUserPlus />
+                    <span>Crear Cuenta</span>
+                  </>
+                )}
+              </motion.button>
+            </form>
 
-            <SectionCard className="border border-slate-200 bg-white shadow-sm">
-              <p className="text-sm text-slate-700">
-                ¿Ya tienes cuenta?{" "}
-                <Link
-                  className="font-semibold text-sky-700 hover:text-sky-600"
-                  href="/login"
-                >
-                  Inicia sesión
-                </Link>
-              </p>
-            </SectionCard>
+            <div className="pt-4 border-t border-slate-100 text-center">
+              <Link className="inline-flex items-center gap-2 text-sm font-bold text-sky-700 hover:text-sky-600 transition-all px-6 py-2.5 rounded-xl bg-sky-50 hover:bg-sky-100" href="/login">
+                <FaSignInAlt />
+                <span>Ya tengo cuenta</span>
+              </Link>
+            </div>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
+      </motion.div>
+    </main>
   );
 }

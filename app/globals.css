@@ -54,6 +54,30 @@ button {
   @apply overflow-x-auto rounded-xl border border-slate-200;
 }
 
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoomIn95 {
+  from { transform: scale(0.95); }
+  to { transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-in {
+  animation: fadeIn 200ms ease-out forwards, zoomIn95 200ms ease-out forwards;
+}
+
+.slide-in {
+  animation: slideUp 200ms ease-out forwards;
+}
+
 .data-table {
   @apply min-w-full text-sm;
 }
@@ -73,15 +97,4 @@ button {
 
 .data-table tbody tr:last-child {
   @apply border-b-0;
-}
-.card-soft {
-  @apply rounded-3xl border border-slate-200 bg-white shadow-sm;
-}
-
-.page-shell {
-  @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8;
-}
-
-.input-helper {
-  @apply mt-1 text-xs text-slate-500;
 }

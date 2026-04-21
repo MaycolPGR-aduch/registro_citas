@@ -1,288 +1,346 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { SectionCard } from "@/components/ui/section-card";
-import { ErrorMessage } from "@/components/ui/error-message";
-import { SuccessMessage } from "@/components/ui/success-message";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { LoadingState } from "@/components/ui/loading-state";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence, Variants } from "framer-motion";
+import { FaCalendarCheck, FaEdit, FaTrash, FaSave, FaTimes, FaFilter, FaList } from "react-icons/fa";
+import { sileo } from "sileo";
 import { EmptyState } from "@/components/ui/empty-state";
+import { TableSkeleton } from "@/components/ui/loading-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { fetchJson } from "@/lib/fetcher";
-import { ApiPayload, AppointmentSummary } from "@/lib/types";
+import { ApiPayload, AppointmentStatus, AppointmentSummary } from "@/lib/types";
 
-type ViewMode = "upcoming" | "cancelled" | "history";
+type EditableAppointment = {
+  status: AppointmentStatus;
+  reason: string;
+  notes: string;
+};
 
-function isPastAppointment(appointment: AppointmentSummary) {
-  const dateTime = new Date(`${appointment.appointment_date}T${appointment.appointment_time}`);
-  return dateTime.getTime() < Date.now();
-}
+const STATUS_OPTIONS: Array<{ value: "" | AppointmentStatus; label: string }> = [
+  { value: "", label: "Todos" },
+  { value: "scheduled", label: "Programada" },
+  { value: "completed", label: "Completada" },
+  { value: "cancelled", label: "Cancelada" },
+  { value: "no_show", label: "No asistió" },
+];
 
-function formatDateLabel(date: string) {
-  const parsed = new Date(`${date}T00:00:00`);
-  return new Intl.DateTimeFormat("es-PE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(parsed);
-}
+const tableContainerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 }
+  }
+};
 
-function formatTimeLabel(time: string) {
-  return time.slice(0, 5);
-}
+const rowVariants: Variants = {
+  hidden: { opacity: 0, x: -10 },
+  visible: { 
+    opacity: 1, 
+    x: 0,
+    transition: { type: "spring", stiffness: 100, damping: 12 }
+  },
+  exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2 } }
+};
 
-export default function MisCitasPage() {
+export default function CitasPage() {
   const [appointments, setAppointments] = useState<AppointmentSummary[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"" | AppointmentStatus>("");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<number | null>(null);
-  const [view, setView] = useState<ViewMode>("upcoming");
 
-  async function load() {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingForm, setEditingForm] = useState<EditableAppointment>({
+    status: "scheduled",
+    reason: "",
+    notes: "",
+  });
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [appointmentToDelete, setAppointmentToDelete] = useState<AppointmentSummary | null>(null);
+
+  const filtersQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (statusFilter) {
+      params.set("status", statusFilter);
+    }
+    return params.toString();
+  }, [statusFilter]);
+
+  const loadAppointments = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
-
-      const res = await fetchJson<ApiPayload<AppointmentSummary[]>>("/api/appointments");
-      setAppointments(res.data);
-    } catch {
-      setError("No se pudieron cargar tus citas.");
+      const response = await fetchJson<ApiPayload<AppointmentSummary[]>>(
+        `/api/appointments${filtersQuery ? `?${filtersQuery}` : ""}`,
+      );
+      setAppointments(response.data);
+    } catch (caught) {
+      sileo.error({ title: "Error", description: "No se pudieron cargar las citas." });
     } finally {
       setLoading(false);
     }
-  }
+  }, [filtersQuery]);
 
   useEffect(() => {
-    void load();
-  }, []);
+    const timeoutId = window.setTimeout(() => {
+      void loadAppointments();
+    }, 0);
 
-  async function cancelAppointment(id: number) {
-    if (!window.confirm("¿Deseas cancelar esta cita?")) {
-      return;
-    }
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadAppointments]);
 
+  function startEdit(appointment: AppointmentSummary) {
+    setEditingId(appointment.id);
+    setEditingForm({
+      status: appointment.status,
+      reason: appointment.reason ?? "",
+      notes: appointment.notes ?? "",
+    });
+  }
+
+  async function saveEdit(appointmentId: number) {
     try {
-      setProcessingId(id);
-      setError(null);
-      setSuccess(null);
-
-      await fetchJson(`/api/appointments/${id}`, {
+      setProcessingId(appointmentId);
+      await fetchJson<ApiPayload<AppointmentSummary>>(`/api/appointments/${appointmentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "cancelled" }),
+        body: JSON.stringify(editingForm),
       });
 
-      setSuccess("Cita cancelada correctamente.");
-      await load();
-    } catch {
-      setError("No se pudo cancelar la cita.");
+      setEditingId(null);
+      sileo.success({ title: "Actualizado", description: "Cita actualizada correctamente." });
+      await loadAppointments();
+    } catch (caught) {
+      sileo.error({ title: "Error", description: "No se pudo actualizar la cita." });
     } finally {
       setProcessingId(null);
     }
   }
 
-  const summary = useMemo(() => {
-    const upcoming = appointments.filter(
-      (a) => a.status === "scheduled" && !isPastAppointment(a),
-    ).length;
+  function confirmDelete(appointment: AppointmentSummary) {
+    setAppointmentToDelete(appointment);
+    setIsDeleteModalOpen(true);
+  }
 
-    const cancelled = appointments.filter((a) => a.status === "cancelled").length;
+  async function handleRemove() {
+    if (!appointmentToDelete) return;
 
-    const history = appointments.filter(
-      (a) =>
-        a.status === "completed" ||
-        a.status === "no_show" ||
-        (a.status === "scheduled" && isPastAppointment(a)),
-    ).length;
+    try {
+      setProcessingId(appointmentToDelete.id);
+      await fetchJson<ApiPayload<{ deleted: boolean }>>(`/api/appointments/${appointmentToDelete.id}`, {
+        method: "DELETE",
+      });
 
-    return { upcoming, cancelled, history, total: appointments.length };
-  }, [appointments]);
-
-  const visibleAppointments = useMemo(() => {
-    const sorted = [...appointments].sort((a, b) => {
-      const aTime = new Date(`${a.appointment_date}T${a.appointment_time}`).getTime();
-      const bTime = new Date(`${b.appointment_date}T${b.appointment_time}`).getTime();
-      return bTime - aTime;
-    });
-
-    switch (view) {
-      case "upcoming":
-        return sorted
-          .filter((a) => a.status === "scheduled" && !isPastAppointment(a))
-          .sort((a, b) => {
-            const aTime = new Date(`${a.appointment_date}T${a.appointment_time}`).getTime();
-            const bTime = new Date(`${b.appointment_date}T${b.appointment_time}`).getTime();
-            return aTime - bTime;
-          });
-
-      case "cancelled":
-        return sorted.filter((a) => a.status === "cancelled");
-
-      case "history":
-        return sorted.filter(
-          (a) =>
-            a.status === "completed" ||
-            a.status === "no_show" ||
-            (a.status === "scheduled" && isPastAppointment(a)),
-        );
-
-      default:
-        return sorted;
+      sileo.success({ title: "Eliminado", description: "Cita eliminada correctamente." });
+      setIsDeleteModalOpen(false);
+      setAppointmentToDelete(null);
+      await loadAppointments();
+    } catch (caught) {
+      sileo.error({ title: "Error", description: "No se pudo eliminar la cita." });
+    } finally {
+      setProcessingId(null);
     }
-  }, [appointments, view]);
+  }
 
   return (
     <section className="space-y-4">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold">Mis citas</h1>
-        <p className="text-sm text-slate-600">
-          Revisa tus próximas citas, cancelaciones e historial.
-        </p>
-      </header>
-
-      {error && <ErrorMessage message={error} />}
-      {success && <SuccessMessage message={success} />}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <SectionCard>
-          <p className="text-sm font-medium text-slate-500">Total</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.total}</p>
-        </SectionCard>
-
-        <SectionCard>
-          <p className="text-sm font-medium text-slate-500">Próximas</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.upcoming}</p>
-        </SectionCard>
-
-        <SectionCard>
-          <p className="text-sm font-medium text-slate-500">Canceladas</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.cancelled}</p>
-        </SectionCard>
-
-        <SectionCard>
-          <p className="text-sm font-medium text-slate-500">Historial</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.history}</p>
-        </SectionCard>
-      </div>
+      <PageHeader
+        title="Gestión de Citas"
+        description="Edita estado y detalles de citas, o elimínalas cuando sea necesario."
+        icon={<FaCalendarCheck size={28} />}
+      />
 
       <SectionCard>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={view === "upcoming" ? "btn-primary" : "btn-secondary"}
-              onClick={() => setView("upcoming")}
-            >
-              Próximas
-            </button>
-
-            <button
-              type="button"
-              className={view === "cancelled" ? "btn-primary" : "btn-secondary"}
-              onClick={() => setView("cancelled")}
-            >
-              Canceladas
-            </button>
-
-            <button
-              type="button"
-              className={view === "history" ? "btn-primary" : "btn-secondary"}
-              onClick={() => setView("history")}
-            >
-              Historial
-            </button>
-          </div>
-
-          <Link href="/citas/nueva" className="btn-primary">
-            Reservar nueva cita
-          </Link>
+        <div className="max-w-xs space-y-1">
+          <label htmlFor="status" className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <FaFilter className="text-sky-500 text-xs" />
+            <span>Filtrar por Estado</span>
+          </label>
+          <select
+            id="status"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as "" | AppointmentStatus)}
+            className="w-full shadow-sm"
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
       </SectionCard>
 
       <SectionCard>
-        {loading && <LoadingState label="Cargando tus citas..." />}
-
-        {!loading && visibleAppointments.length === 0 && (
-          <EmptyState
-            title="Sin citas"
-            description={
-              view === "upcoming"
-                ? "No tienes próximas citas registradas."
-                : view === "cancelled"
-                  ? "No tienes citas canceladas."
-                  : "No hay citas en tu historial."
-            }
-          />
-        )}
-
-        {!loading && visibleAppointments.length > 0 && (
-          <div className="grid gap-4">
-            {visibleAppointments.map((a) => {
-              const isProcessing = processingId === a.id;
-              const canCancel = a.status === "scheduled" && !isPastAppointment(a);
-
-              return (
-                <div
-                  key={a.id}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="space-y-2">
-                      <div>
-                        <p className="text-lg font-semibold text-slate-900">
-                          {a.doctor?.full_name ?? "Médico"}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {a.doctor?.specialty_name ?? "Sin especialidad"}
-                        </p>
-                      </div>
-
-                      <div className="grid gap-2 text-sm text-slate-700 md:grid-cols-2">
-                        <p>
-                          <span className="font-medium">Fecha:</span>{" "}
-                          {formatDateLabel(a.appointment_date)}
-                        </p>
-                        <p>
-                          <span className="font-medium">Hora:</span>{" "}
-                          {formatTimeLabel(a.appointment_time)}
-                        </p>
-                      </div>
-
-                      {a.reason && (
-                        <p className="text-sm text-slate-700">
-                          <span className="font-medium">Motivo:</span> {a.reason}
-                        </p>
-                      )}
-
-                      {a.notes && (
-                        <p className="text-sm text-slate-700">
-                          <span className="font-medium">Notas:</span> {a.notes}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col items-start gap-3 md:items-end">
-                      <StatusBadge status={a.status} />
-
-                      {canCancel && (
-                        <button
-                          type="button"
-                          className="btn-danger"
-                          onClick={() => cancelAppointment(a.id)}
-                          disabled={isProcessing}
-                        >
-                          {isProcessing ? "Cancelando..." : "Cancelar cita"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
+            <FaList />
           </div>
+          <h2 className="text-xl font-bold text-slate-800">Listado de Citas</h2>
+        </div>
+
+        {loading ? (
+          <TableSkeleton cols={8} rows={7} />
+        ) : (
+          <>
+            {!loading && appointments.length === 0 && (
+              <EmptyState title="Sin citas" description="No hay citas para el filtro seleccionado." />
+            )}
+
+            {!loading && appointments.length > 0 && (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Hora</th>
+                      <th>Paciente</th>
+                      <th>Médico</th>
+                      <th>Estado</th>
+                      <th>Motivo</th>
+                      <th>Notas</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <motion.tbody
+                    variants={tableContainerVariants}
+                    initial="hidden"
+                    animate="visible"
+                  >
+                    <AnimatePresence mode="popLayout">
+                      {appointments.map((appointment) => {
+                        const isEditing = editingId === appointment.id;
+                        const isProcessing = processingId === appointment.id;
+
+                        return (
+                          <motion.tr key={appointment.id} variants={rowVariants} layout exit="exit">
+                            <td>{appointment.appointment_date}</td>
+                            <td>{appointment.appointment_time.slice(0, 5)}</td>
+                            <td><span className="font-medium text-slate-700">{appointment.patient?.full_name ?? "Sin paciente"}</span></td>
+                            <td>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-slate-900">{appointment.doctor?.full_name ?? "Sin médico"}</span>
+                                <span className="text-[10px] font-bold uppercase text-sky-600">{appointment.doctor?.specialty_name ?? ""}</span>
+                              </div>
+                            </td>
+                            <td>
+                              {isEditing ? (
+                                <select
+                                  value={editingForm.status}
+                                  onChange={(event) =>
+                                    setEditingForm((prev) => ({
+                                      ...prev,
+                                      status: event.target.value as AppointmentStatus,
+                                    }))
+                                  }
+                                  className="text-sm p-1 shadow-sm rounded"
+                                >
+                                  {STATUS_OPTIONS.filter((option) => option.value).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <StatusBadge status={appointment.status} />
+                              )}
+                            </td>
+                            <td>
+                              {isEditing ? (
+                                <input
+                                  value={editingForm.reason}
+                                  onChange={(event) =>
+                                    setEditingForm((prev) => ({ ...prev, reason: event.target.value }))
+                                  }
+                                  className="text-sm p-1 w-full shadow-sm rounded"
+                                />
+                              ) : (
+                                <span className="text-slate-600 text-sm">{appointment.reason ?? "Sin detalle"}</span>
+                              )}
+                            </td>
+                            <td>
+                              {isEditing ? (
+                                <input
+                                  value={editingForm.notes}
+                                  onChange={(event) =>
+                                    setEditingForm((prev) => ({ ...prev, notes: event.target.value }))
+                                  }
+                                  className="text-sm p-1 w-full shadow-sm rounded"
+                                />
+                              ) : (
+                                <span className="text-slate-400 text-xs italic">{appointment.notes ?? "Sin notas"}</span>
+                              )}
+                            </td>
+                            <td className="space-x-2">
+                              {isEditing ? (
+                                <div className="flex gap-2">
+                                  <motion.button
+                                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                    type="button"
+                                    className="btn-primary flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                                    onClick={() => void saveEdit(appointment.id)}
+                                    disabled={isProcessing}
+                                  >
+                                    <FaSave />
+                                    <span>Guardar</span>
+                                  </motion.button>
+                                  <motion.button
+                                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                    type="button"
+                                    className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                                    onClick={() => setEditingId(null)}
+                                    disabled={isProcessing}
+                                  >
+                                    <FaTimes />
+                                    <span>Cancelar</span>
+                                  </motion.button>
+                                </div>
+                              ) : (
+                                <div className="flex gap-2">
+                                  <motion.button 
+                                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                    type="button" className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs" onClick={() => startEdit(appointment)}>
+                                    <FaEdit className="text-sky-600" />
+                                    <span>Editar</span>
+                                  </motion.button>
+                                  <motion.button
+                                    whileHover={{ scale: 1.05, backgroundColor: "#fee2e2" }} whileTap={{ scale: 0.95 }}
+                                    type="button"
+                                    className="btn-danger flex items-center gap-1.5 px-3 py-1.5 text-xs"
+                                    onClick={() => confirmDelete(appointment)}
+                                    disabled={isProcessing}
+                                  >
+                                    <FaTrash />
+                                    <span>Eliminar</span>
+                                  </motion.button>
+                                </div>
+                              )}
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </motion.tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </SectionCard>
+
+      {/* Modal de Confirmación para Eliminar */}
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={() => void handleRemove()}
+        title="Eliminar Cita"
+        description={`¿Estás seguro de que deseas eliminar esta cita médica? Esta acción no se puede deshacer.`}
+        isLoading={processingId === appointmentToDelete?.id}
+      />
     </section>
   );
 }
