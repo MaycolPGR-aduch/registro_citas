@@ -6,6 +6,10 @@ Aplicacion web academica para gestionar citas medicas con:
 - TypeScript
 - Tailwind CSS
 - Supabase (Postgres + Auth)
+- Framer Motion (Animaciones fluidas)
+- Sileo (Notificaciones interactivas)
+- React Icons (Iconografía médica)
+
 
 ## SQL de referencia y migraciones
 
