@@ -35,6 +35,16 @@ export function timeToMinutes(value: string): number {
   return Number(hours) * 60 + Number(minutes);
 }
 
+export function minutesToTime(totalMinutes: number): string {
+  const normalized = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hours = Math.floor(normalized / 60)
+    .toString()
+    .padStart(2, "0");
+  const minutes = (normalized % 60).toString().padStart(2, "0");
+
+  return `${hours}:${minutes}`;
+}
+
 export function normalizeOptionalText(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") {
     return null;
@@ -72,4 +82,13 @@ export function parseBoolean(value: unknown): boolean | null {
     return false;
   }
   return null;
+}
+
+export function isValidSlotMinutes(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 5 &&
+    value <= 180
+  );
 }
