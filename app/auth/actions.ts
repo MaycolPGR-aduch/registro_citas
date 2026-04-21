@@ -24,11 +24,19 @@ function normalizeSafePath(value: unknown): string | null {
 
 async function getRoleFromProfile(userId: string): Promise<UserRole | null> {
   const supabase = await createSupabaseServerClient();
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
   return (profile?.role ?? null) as UserRole | null;
 }
 
-export async function signInAction(_: AuthFormState, formData: FormData): Promise<AuthFormState> {
+export async function signInAction(
+  _: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const nextPath = normalizeSafePath(formData.get("next"));
@@ -48,7 +56,7 @@ export async function signInAction(_: AuthFormState, formData: FormData): Promis
 
   if (error || !data.user) {
     return {
-      error: error?.message ?? "No se pudo iniciar sesion.",
+      error: error?.message ?? "No se pudo iniciar sesión.",
       message: null,
     };
   }
@@ -57,7 +65,10 @@ export async function signInAction(_: AuthFormState, formData: FormData): Promis
   redirect(nextPath ?? resolveHomePath(role));
 }
 
-export async function signUpPatientAction(_: AuthFormState, formData: FormData): Promise<AuthFormState> {
+export async function signUpPatientAction(
+  _: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
   const fullName = String(formData.get("full_name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -100,7 +111,7 @@ export async function signUpPatientAction(_: AuthFormState, formData: FormData):
 
   return {
     error: null,
-    message: "Cuenta creada. Inicia sesion para continuar.",
+    message: "Cuenta creada correctamente. Inicia sesión para continuar.",
   };
 }
 

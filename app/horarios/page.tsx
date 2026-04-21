@@ -18,6 +18,21 @@ type ScheduleForm = {
   is_available: boolean;
 };
 
+type BulkScheduleForm = {
+  doctor_id: string;
+  schedule_date: string;
+  start_time: string;
+  end_time: string;
+  slot_minutes: string;
+  is_available: boolean;
+};
+
+type BulkScheduleResponse = {
+  created: number;
+  skipped: number;
+  message: string;
+};
+
 const INITIAL_FORM: ScheduleForm = {
   doctor_id: "",
   schedule_date: "",
@@ -26,16 +41,29 @@ const INITIAL_FORM: ScheduleForm = {
   is_available: true,
 };
 
+const INITIAL_BULK_FORM: BulkScheduleForm = {
+  doctor_id: "",
+  schedule_date: "",
+  start_time: "",
+  end_time: "",
+  slot_minutes: "30",
+  is_available: true,
+};
+
 export default function HorariosPage() {
   const [doctors, setDoctors] = useState<DoctorSummary[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
 
   const [form, setForm] = useState<ScheduleForm>(INITIAL_FORM);
+  const [bulkForm, setBulkForm] = useState<BulkScheduleForm>(INITIAL_BULK_FORM);
+
   const [doctorFilter, setDoctorFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -64,7 +92,7 @@ export default function HorariosPage() {
       setError(null);
       await Promise.all([loadDoctors(), loadSchedules()]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudo cargar la informacion de horarios.");
+      setError(caught instanceof Error ? caught.message : "No se pudo cargar la información de horarios.");
     } finally {
       setLoading(false);
     }
@@ -84,7 +112,7 @@ export default function HorariosPage() {
     event.preventDefault();
 
     if (!form.doctor_id || !form.schedule_date || !form.start_time || !form.end_time) {
-      setError("Completa doctor, fecha, hora inicio y hora fin.");
+      setError("Completa médico, fecha, hora inicio y hora fin.");
       return;
     }
 
@@ -112,6 +140,51 @@ export default function HorariosPage() {
     }
   }
 
+  async function handleBulkCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (
+      !bulkForm.doctor_id ||
+      !bulkForm.schedule_date ||
+      !bulkForm.start_time ||
+      !bulkForm.end_time ||
+      !bulkForm.slot_minutes
+    ) {
+      setError("Completa médico, fecha, hora inicio, hora fin e intervalo.");
+      return;
+    }
+
+    try {
+      setBulkSubmitting(true);
+      setError(null);
+      setSuccess(null);
+
+      const response = await fetchJson<ApiPayload<BulkScheduleResponse>>("/api/schedules/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          doctor_id: Number(bulkForm.doctor_id),
+          schedule_date: bulkForm.schedule_date,
+          start_time: bulkForm.start_time,
+          end_time: bulkForm.end_time,
+          slot_minutes: Number(bulkForm.slot_minutes),
+          is_available: bulkForm.is_available,
+        }),
+      });
+
+      setSuccess(
+        `${response.data.message} Creados: ${response.data.created}. Omitidos: ${response.data.skipped}.`,
+      );
+
+      setBulkForm(INITIAL_BULK_FORM);
+      await loadSchedules();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "No se pudieron generar los bloques horarios.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }
+
   function startEdit(item: ScheduleSummary) {
     setEditingId(item.id);
     setEditingForm({
@@ -127,7 +200,7 @@ export default function HorariosPage() {
     if (!editingId) return;
 
     if (!editingForm.doctor_id || !editingForm.schedule_date || !editingForm.start_time || !editingForm.end_time) {
-      setError("Completa doctor, fecha, hora inicio y hora fin.");
+      setError("Completa médico, fecha, hora inicio y hora fin.");
       return;
     }
 
@@ -156,7 +229,7 @@ export default function HorariosPage() {
   }
 
   async function removeSchedule(id: number) {
-    if (!window.confirm("Deseas eliminar este horario?")) {
+    if (!window.confirm("¿Deseas eliminar este horario?")) {
       return;
     }
 
@@ -182,24 +255,24 @@ export default function HorariosPage() {
     <section className="space-y-4">
       <PageHeader
         title="Horarios"
-        description="Gestiona bloques horarios por medico, incluyendo disponibilidad y edicion."
+        description="Gestiona bloques horarios por médico, incluyendo creación manual, generación automática y edición."
       />
 
       {error && <ErrorMessage message={error} />}
       {success && <SuccessMessage message={success} />}
 
       <SectionCard>
-        <h2 className="mb-3">Nuevo horario</h2>
+        <h2 className="mb-3 text-lg font-semibold">Nuevo horario individual</h2>
         <form className="grid gap-3 md:grid-cols-3" onSubmit={handleCreate}>
           <div>
-            <label htmlFor="doctor_id">Medico *</label>
+            <label htmlFor="doctor_id">Médico *</label>
             <select
               id="doctor_id"
               value={form.doctor_id}
               onChange={(event) => setForm((prev) => ({ ...prev, doctor_id: event.target.value }))}
               required
             >
-              <option value="">Seleccionar medico</option>
+              <option value="">Seleccionar médico</option>
               {doctors.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctor.full_name}
@@ -261,10 +334,114 @@ export default function HorariosPage() {
       </SectionCard>
 
       <SectionCard>
-        <h2 className="mb-3">Filtros</h2>
+        <h2 className="mb-3 text-lg font-semibold">Generación automática de bloques</h2>
+        <p className="mb-4 text-sm text-slate-600">
+          Crea varios bloques en una sola acción, por ejemplo de 09:00 a 13:00 cada 30 minutos.
+        </p>
+
+        <form className="grid gap-3 md:grid-cols-3" onSubmit={handleBulkCreate}>
+          <div>
+            <label htmlFor="bulk_doctor_id">Médico *</label>
+            <select
+              id="bulk_doctor_id"
+              value={bulkForm.doctor_id}
+              onChange={(event) =>
+                setBulkForm((prev) => ({ ...prev, doctor_id: event.target.value }))
+              }
+              required
+            >
+              <option value="">Seleccionar médico</option>
+              {doctors.map((doctor) => (
+                <option key={doctor.id} value={doctor.id}>
+                  {doctor.full_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="bulk_schedule_date">Fecha *</label>
+            <input
+              id="bulk_schedule_date"
+              type="date"
+              value={bulkForm.schedule_date}
+              onChange={(event) =>
+                setBulkForm((prev) => ({ ...prev, schedule_date: event.target.value }))
+              }
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="slot_minutes">Intervalo (minutos) *</label>
+            <select
+              id="slot_minutes"
+              value={bulkForm.slot_minutes}
+              onChange={(event) =>
+                setBulkForm((prev) => ({ ...prev, slot_minutes: event.target.value }))
+              }
+              required
+            >
+              <option value="15">15 minutos</option>
+              <option value="20">20 minutos</option>
+              <option value="30">30 minutos</option>
+              <option value="45">45 minutos</option>
+              <option value="60">60 minutos</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="bulk_start_time">Hora inicio *</label>
+            <input
+              id="bulk_start_time"
+              type="time"
+              value={bulkForm.start_time}
+              onChange={(event) =>
+                setBulkForm((prev) => ({ ...prev, start_time: event.target.value }))
+              }
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="bulk_end_time">Hora fin *</label>
+            <input
+              id="bulk_end_time"
+              type="time"
+              value={bulkForm.end_time}
+              onChange={(event) =>
+                setBulkForm((prev) => ({ ...prev, end_time: event.target.value }))
+              }
+              required
+            />
+          </div>
+
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={bulkForm.is_available}
+                onChange={(event) =>
+                  setBulkForm((prev) => ({ ...prev, is_available: event.target.checked }))
+                }
+              />
+              Crear como disponibles
+            </label>
+          </div>
+
+          <div className="md:col-span-3">
+            <button type="submit" className="btn-primary" disabled={bulkSubmitting}>
+              {bulkSubmitting ? "Generando..." : "Generar bloques automáticos"}
+            </button>
+          </div>
+        </form>
+      </SectionCard>
+
+      <SectionCard>
+        <h2 className="mb-3 text-lg font-semibold">Filtros</h2>
         <div className="grid gap-3 md:grid-cols-2">
           <div>
-            <label htmlFor="doctor-filter">Filtrar por medico</label>
+            <label htmlFor="doctor-filter">Filtrar por médico</label>
             <select
               id="doctor-filter"
               value={doctorFilter}
@@ -278,6 +455,7 @@ export default function HorariosPage() {
               ))}
             </select>
           </div>
+
           <div>
             <label htmlFor="date-filter">Filtrar por fecha</label>
             <input
@@ -291,7 +469,7 @@ export default function HorariosPage() {
       </SectionCard>
 
       <SectionCard>
-        <h2 className="mb-3">Listado</h2>
+        <h2 className="mb-3 text-lg font-semibold">Listado</h2>
 
         {loading && <LoadingState />}
         {!loading && schedules.length === 0 && (
@@ -306,7 +484,7 @@ export default function HorariosPage() {
                   <th>Fecha</th>
                   <th>Inicio</th>
                   <th>Fin</th>
-                  <th>Medico</th>
+                  <th>Médico</th>
                   <th>Especialidad</th>
                   <th>Disponible</th>
                   <th>Cita activa</th>
@@ -332,6 +510,7 @@ export default function HorariosPage() {
                           schedule.schedule_date
                         )}
                       </td>
+
                       <td>
                         {isEditing ? (
                           <input
@@ -345,6 +524,7 @@ export default function HorariosPage() {
                           schedule.start_time.slice(0, 5)
                         )}
                       </td>
+
                       <td>
                         {isEditing ? (
                           <input
@@ -358,6 +538,7 @@ export default function HorariosPage() {
                           schedule.end_time.slice(0, 5)
                         )}
                       </td>
+
                       <td>
                         {isEditing ? (
                           <select
@@ -366,7 +547,7 @@ export default function HorariosPage() {
                               setEditingForm((prev) => ({ ...prev, doctor_id: event.target.value }))
                             }
                           >
-                            <option value="">Seleccionar medico</option>
+                            <option value="">Seleccionar médico</option>
                             {doctors.map((doctor) => (
                               <option key={doctor.id} value={doctor.id}>
                                 {doctor.full_name}
@@ -377,7 +558,9 @@ export default function HorariosPage() {
                           schedule.doctor_name
                         )}
                       </td>
+
                       <td>{schedule.specialty_name ?? "Sin especialidad"}</td>
+
                       <td>
                         {isEditing ? (
                           <label className="inline-flex items-center gap-2">
@@ -391,12 +574,14 @@ export default function HorariosPage() {
                             Disponible
                           </label>
                         ) : schedule.is_available ? (
-                          "Si"
+                          "Sí"
                         ) : (
                           "No"
                         )}
                       </td>
-                      <td>{schedule.has_active_appointment ? "Si" : "No"}</td>
+
+                      <td>{schedule.has_active_appointment ? "Sí" : "No"}</td>
+
                       <td className="space-x-2">
                         {isEditing ? (
                           <>

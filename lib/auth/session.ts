@@ -1,4 +1,5 @@
 import "server-only";
+
 import { User } from "@supabase/supabase-js";
 import { errorResponse } from "@/lib/http";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -11,7 +12,9 @@ type AuthContext = {
   patientId: number | null;
 };
 
-export function isStaffRole(role: UserRole | null | undefined): role is "admin" | "receptionist" {
+export function isStaffRole(
+  role: UserRole | null | undefined,
+): role is "admin" | "receptionist" {
   return role === "admin" || role === "receptionist";
 }
 
@@ -58,6 +61,7 @@ export async function getAuthContext(): Promise<AuthContext> {
 
 export async function requireAuth() {
   const context = await getAuthContext();
+
   if (!context.user || !context.profile) {
     return {
       ok: false as const,
@@ -77,6 +81,7 @@ export async function requireAuth() {
 
 export async function requireRole(allowedRoles: UserRole[]) {
   const authResult = await requireAuth();
+
   if (!authResult.ok) {
     return authResult;
   }
@@ -93,6 +98,7 @@ export async function requireRole(allowedRoles: UserRole[]) {
 
 export async function requireStaff() {
   const authResult = await requireAuth();
+
   if (!authResult.ok) {
     return authResult;
   }
@@ -109,6 +115,7 @@ export async function requireStaff() {
 
 export async function requirePatient() {
   const authResult = await requireAuth();
+
   if (!authResult.ok) {
     return authResult;
   }

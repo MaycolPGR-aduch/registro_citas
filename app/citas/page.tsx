@@ -1,283 +1,285 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorMessage } from "@/components/ui/error-message";
-import { LoadingState } from "@/components/ui/loading-state";
-import { PageHeader } from "@/components/ui/page-header";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { SectionCard } from "@/components/ui/section-card";
-import { StatusBadge } from "@/components/ui/status-badge";
+import { ErrorMessage } from "@/components/ui/error-message";
 import { SuccessMessage } from "@/components/ui/success-message";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { LoadingState } from "@/components/ui/loading-state";
+import { EmptyState } from "@/components/ui/empty-state";
 import { fetchJson } from "@/lib/fetcher";
-import { ApiPayload, AppointmentStatus, AppointmentSummary } from "@/lib/types";
+import { ApiPayload, AppointmentSummary } from "@/lib/types";
 
-type EditableAppointment = {
-  status: AppointmentStatus;
-  reason: string;
-  notes: string;
-};
+type ViewMode = "upcoming" | "cancelled" | "history";
 
-const STATUS_OPTIONS: Array<{ value: "" | AppointmentStatus; label: string }> = [
-  { value: "", label: "Todos" },
-  { value: "scheduled", label: "Programada" },
-  { value: "completed", label: "Completada" },
-  { value: "cancelled", label: "Cancelada" },
-  { value: "no_show", label: "No asistio" },
-];
+function isPastAppointment(appointment: AppointmentSummary) {
+  const dateTime = new Date(`${appointment.appointment_date}T${appointment.appointment_time}`);
+  return dateTime.getTime() < Date.now();
+}
 
-export default function CitasPage() {
+function formatDateLabel(date: string) {
+  const parsed = new Date(`${date}T00:00:00`);
+  return new Intl.DateTimeFormat("es-PE", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function formatTimeLabel(time: string) {
+  return time.slice(0, 5);
+}
+
+export default function MisCitasPage() {
   const [appointments, setAppointments] = useState<AppointmentSummary[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"" | AppointmentStatus>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [view, setView] = useState<ViewMode>("upcoming");
 
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingForm, setEditingForm] = useState<EditableAppointment>({
-    status: "scheduled",
-    reason: "",
-    notes: "",
-  });
-
-  const filtersQuery = useMemo(() => {
-    const params = new URLSearchParams();
-    if (statusFilter) {
-      params.set("status", statusFilter);
-    }
-    return params.toString();
-  }, [statusFilter]);
-
-  const loadAppointments = useCallback(async () => {
+  async function load() {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await fetchJson<ApiPayload<AppointmentSummary[]>>(
-        `/api/appointments${filtersQuery ? `?${filtersQuery}` : ""}`,
-      );
-      setAppointments(response.data);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudieron cargar las citas.");
+      const res = await fetchJson<ApiPayload<AppointmentSummary[]>>("/api/appointments");
+      setAppointments(res.data);
+    } catch {
+      setError("No se pudieron cargar tus citas.");
     } finally {
       setLoading(false);
     }
-  }, [filtersQuery]);
+  }
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadAppointments();
-    }, 0);
+    void load();
+  }, []);
 
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [loadAppointments]);
-
-  function startEdit(appointment: AppointmentSummary) {
-    setEditingId(appointment.id);
-    setEditingForm({
-      status: appointment.status,
-      reason: appointment.reason ?? "",
-      notes: appointment.notes ?? "",
-    });
-  }
-
-  async function saveEdit(appointmentId: number) {
-    try {
-      setProcessingId(appointmentId);
-      setError(null);
-      setSuccess(null);
-
-      await fetchJson<ApiPayload<AppointmentSummary>>(`/api/appointments/${appointmentId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(editingForm),
-      });
-
-      setEditingId(null);
-      setSuccess("Cita actualizada correctamente.");
-      await loadAppointments();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudo actualizar la cita.");
-    } finally {
-      setProcessingId(null);
-    }
-  }
-
-  async function removeAppointment(appointmentId: number) {
-    if (!window.confirm("Deseas eliminar esta cita?")) {
+  async function cancelAppointment(id: number) {
+    if (!window.confirm("¿Deseas cancelar esta cita?")) {
       return;
     }
 
     try {
-      setProcessingId(appointmentId);
+      setProcessingId(id);
       setError(null);
       setSuccess(null);
 
-      await fetchJson<ApiPayload<{ deleted: boolean }>>(`/api/appointments/${appointmentId}`, {
-        method: "DELETE",
+      await fetchJson(`/api/appointments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
       });
 
-      setSuccess("Cita eliminada correctamente.");
-      await loadAppointments();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudo eliminar la cita.");
+      setSuccess("Cita cancelada correctamente.");
+      await load();
+    } catch {
+      setError("No se pudo cancelar la cita.");
     } finally {
       setProcessingId(null);
     }
   }
 
+  const summary = useMemo(() => {
+    const upcoming = appointments.filter(
+      (a) => a.status === "scheduled" && !isPastAppointment(a),
+    ).length;
+
+    const cancelled = appointments.filter((a) => a.status === "cancelled").length;
+
+    const history = appointments.filter(
+      (a) =>
+        a.status === "completed" ||
+        a.status === "no_show" ||
+        (a.status === "scheduled" && isPastAppointment(a)),
+    ).length;
+
+    return { upcoming, cancelled, history, total: appointments.length };
+  }, [appointments]);
+
+  const visibleAppointments = useMemo(() => {
+    const sorted = [...appointments].sort((a, b) => {
+      const aTime = new Date(`${a.appointment_date}T${a.appointment_time}`).getTime();
+      const bTime = new Date(`${b.appointment_date}T${b.appointment_time}`).getTime();
+      return bTime - aTime;
+    });
+
+    switch (view) {
+      case "upcoming":
+        return sorted
+          .filter((a) => a.status === "scheduled" && !isPastAppointment(a))
+          .sort((a, b) => {
+            const aTime = new Date(`${a.appointment_date}T${a.appointment_time}`).getTime();
+            const bTime = new Date(`${b.appointment_date}T${b.appointment_time}`).getTime();
+            return aTime - bTime;
+          });
+
+      case "cancelled":
+        return sorted.filter((a) => a.status === "cancelled");
+
+      case "history":
+        return sorted.filter(
+          (a) =>
+            a.status === "completed" ||
+            a.status === "no_show" ||
+            (a.status === "scheduled" && isPastAppointment(a)),
+        );
+
+      default:
+        return sorted;
+    }
+  }, [appointments, view]);
+
   return (
     <section className="space-y-4">
-      <PageHeader
-        title="Gestion de Citas"
-        description="Edita estado y detalles de citas, o eliminalas cuando sea necesario."
-      />
+      <header className="space-y-2">
+        <h1 className="text-2xl font-bold">Mis citas</h1>
+        <p className="text-sm text-slate-600">
+          Revisa tus próximas citas, cancelaciones e historial.
+        </p>
+      </header>
 
       {error && <ErrorMessage message={error} />}
       {success && <SuccessMessage message={success} />}
 
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <SectionCard>
+          <p className="text-sm font-medium text-slate-500">Total</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.total}</p>
+        </SectionCard>
+
+        <SectionCard>
+          <p className="text-sm font-medium text-slate-500">Próximas</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.upcoming}</p>
+        </SectionCard>
+
+        <SectionCard>
+          <p className="text-sm font-medium text-slate-500">Canceladas</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.cancelled}</p>
+        </SectionCard>
+
+        <SectionCard>
+          <p className="text-sm font-medium text-slate-500">Historial</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900">{summary.history}</p>
+        </SectionCard>
+      </div>
+
       <SectionCard>
-        <div className="max-w-xs">
-          <label htmlFor="status">Filtrar por estado</label>
-          <select
-            id="status"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as "" | AppointmentStatus)}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={view === "upcoming" ? "btn-primary" : "btn-secondary"}
+              onClick={() => setView("upcoming")}
+            >
+              Próximas
+            </button>
+
+            <button
+              type="button"
+              className={view === "cancelled" ? "btn-primary" : "btn-secondary"}
+              onClick={() => setView("cancelled")}
+            >
+              Canceladas
+            </button>
+
+            <button
+              type="button"
+              className={view === "history" ? "btn-primary" : "btn-secondary"}
+              onClick={() => setView("history")}
+            >
+              Historial
+            </button>
+          </div>
+
+          <Link href="/citas/nueva" className="btn-primary">
+            Reservar nueva cita
+          </Link>
         </div>
       </SectionCard>
 
       <SectionCard>
-        {loading && <LoadingState />}
-        {!loading && appointments.length === 0 && (
-          <EmptyState title="Sin citas" description="No hay citas para el filtro seleccionado." />
+        {loading && <LoadingState label="Cargando tus citas..." />}
+
+        {!loading && visibleAppointments.length === 0 && (
+          <EmptyState
+            title="Sin citas"
+            description={
+              view === "upcoming"
+                ? "No tienes próximas citas registradas."
+                : view === "cancelled"
+                  ? "No tienes citas canceladas."
+                  : "No hay citas en tu historial."
+            }
+          />
         )}
 
-        {!loading && appointments.length > 0 && (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Hora</th>
-                  <th>Paciente</th>
-                  <th>Medico</th>
-                  <th>Estado</th>
-                  <th>Motivo</th>
-                  <th>Notas</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {appointments.map((appointment) => {
-                  const isEditing = editingId === appointment.id;
-                  const isProcessing = processingId === appointment.id;
+        {!loading && visibleAppointments.length > 0 && (
+          <div className="grid gap-4">
+            {visibleAppointments.map((a) => {
+              const isProcessing = processingId === a.id;
+              const canCancel = a.status === "scheduled" && !isPastAppointment(a);
 
-                  return (
-                    <tr key={appointment.id}>
-                      <td>{appointment.appointment_date}</td>
-                      <td>{appointment.appointment_time.slice(0, 5)}</td>
-                      <td>{appointment.patient?.full_name ?? "Sin paciente"}</td>
-                      <td>
-                        {appointment.doctor?.full_name ?? "Sin medico"}
-                        {appointment.doctor?.specialty_name ? ` (${appointment.doctor.specialty_name})` : ""}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <select
-                            value={editingForm.status}
-                            onChange={(event) =>
-                              setEditingForm((prev) => ({
-                                ...prev,
-                                status: event.target.value as AppointmentStatus,
-                              }))
-                            }
-                          >
-                            {STATUS_OPTIONS.filter((option) => option.value).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <StatusBadge status={appointment.status} />
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            value={editingForm.reason}
-                            onChange={(event) =>
-                              setEditingForm((prev) => ({ ...prev, reason: event.target.value }))
-                            }
-                          />
-                        ) : (
-                          appointment.reason ?? "Sin detalle"
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            value={editingForm.notes}
-                            onChange={(event) =>
-                              setEditingForm((prev) => ({ ...prev, notes: event.target.value }))
-                            }
-                          />
-                        ) : (
-                          appointment.notes ?? "Sin notas"
-                        )}
-                      </td>
-                      <td className="space-x-2">
-                        {isEditing ? (
-                          <>
-                            <button
-                              type="button"
-                              className="btn-primary"
-                              onClick={() => void saveEdit(appointment.id)}
-                              disabled={isProcessing}
-                            >
-                              Guardar
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              onClick={() => setEditingId(null)}
-                              disabled={isProcessing}
-                            >
-                              Cancelar
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button type="button" className="btn-secondary" onClick={() => startEdit(appointment)}>
-                              Editar
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-danger"
-                              onClick={() => void removeAppointment(appointment.id)}
-                              disabled={isProcessing}
-                            >
-                              Eliminar
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+              return (
+                <div
+                  key={a.id}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-lg font-semibold text-slate-900">
+                          {a.doctor?.full_name ?? "Médico"}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {a.doctor?.specialty_name ?? "Sin especialidad"}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+                        <p>
+                          <span className="font-medium">Fecha:</span>{" "}
+                          {formatDateLabel(a.appointment_date)}
+                        </p>
+                        <p>
+                          <span className="font-medium">Hora:</span>{" "}
+                          {formatTimeLabel(a.appointment_time)}
+                        </p>
+                      </div>
+
+                      {a.reason && (
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">Motivo:</span> {a.reason}
+                        </p>
+                      )}
+
+                      {a.notes && (
+                        <p className="text-sm text-slate-700">
+                          <span className="font-medium">Notas:</span> {a.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-start gap-3 md:items-end">
+                      <StatusBadge status={a.status} />
+
+                      {canCancel && (
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          onClick={() => cancelAppointment(a.id)}
+                          disabled={isProcessing}
+                        >
+                          {isProcessing ? "Cancelando..." : "Cancelar cita"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </SectionCard>
