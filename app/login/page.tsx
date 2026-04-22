@@ -57,7 +57,7 @@ export default function LoginPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 backdrop-blur-xl border border-white/20">
                 <FaHospital className="text-xl text-sky-400" />
               </div>
-              <span className="text-sm font-black tracking-widest uppercase italic opacity-80">Sitema Médico</span>
+              <span className="text-sm font-black tracking-widest uppercase italic opacity-80">Sistema Médico</span>
             </div>
 
             <div className="space-y-6">
